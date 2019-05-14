@@ -103,7 +103,7 @@ impl<B: LimitRead> Iterator for Split<B> {
 
   fn next(&mut self) -> Option<Result<Vec<u8>>> {
     let mut buf = Vec::new();
-    match LimitRead::read_until(&mut self.buf, self.delim, &mut buf, &self.max) {
+    match self.buf.read_until_lim(self.delim, &mut buf, &self.max) {
       Ok(0) => None,
       Ok(_n) => {
         if buf[buf.len() - 1] == self.delim {
@@ -127,7 +127,7 @@ impl<B: LimitRead> Iterator for Lines<B> {
 
   fn next(&mut self) -> Option<Result<String>> {
     let mut buf = String::new();
-    match LimitRead::read_line(&mut self.buf, &mut buf, &self.max) {
+    match self.buf.read_line_lim(&mut buf, &self.max) {
       Ok(0) => None,
       Ok(_n) => {
         if buf.ends_with("\n") {
@@ -144,15 +144,15 @@ impl<B: LimitRead> Iterator for Lines<B> {
 }
 
 pub trait LimitRead: BufRead {
-  fn read_until(&mut self, byte: u8, buf: &mut Vec<u8>, max: &usize) -> Result<usize> {
+  fn read_until_lim(&mut self, byte: u8, buf: &mut Vec<u8>, max: &usize) -> Result<usize> {
     read_until(self, byte, buf, max)
   }
 
-  fn read_line(&mut self, buf: &mut String, max: &usize) -> Result<usize> {
+  fn read_line_lim(&mut self, buf: &mut String, max: &usize) -> Result<usize> {
     append_to_string(buf, max, |b, m| read_until(self, b'\n', b, m))
   }
 
-  fn split(self, byte: u8, max: usize) -> Split<Self>
+  fn split_lim(self, byte: u8, max: usize) -> Split<Self>
   where
     Self: Sized,
   {
@@ -163,7 +163,7 @@ pub trait LimitRead: BufRead {
     }
   }
 
-  fn lines(self, max: usize) -> Lines<Self>
+  fn lines_lim(self, max: usize) -> Lines<Self>
   where
     Self: Sized,
   {
@@ -178,8 +178,105 @@ impl<T: BufRead> LimitRead for T {}
 
 #[cfg(test)]
 mod tests {
+  use crate::LimitRead;
+  use std::io::BufReader;
+
   #[test]
-  fn it_works() {
-    assert_eq!(2 + 2, 4);
+  fn read_until_lim() {
+    // prepare sample and reader
+    let mut sample: Vec<u8> = vec![1; 10];
+    sample[7] = ';' as u8;
+    let mut buf_reader = BufReader::new(sample.as_slice());
+    let mut buf: Vec<u8> = Vec::new();
+
+    // should result in an error
+    let short_lim = 3;
+    buf_reader
+      .read_until_lim(';' as u8, &mut buf, &short_lim)
+      .is_err();
+
+    // should result in ok(7)
+    let long_lim = 10;
+    let size = buf_reader
+      .read_until_lim(';' as u8, &mut buf, &long_lim)
+      .unwrap();
+    assert_eq!(size, 8);
+  }
+
+  #[test]
+  fn read_line_lim() {
+    // prepare sample and reader
+    let mut sample: Vec<u8> = vec![1; 10];
+    sample[7] = '\n' as u8;
+    let mut buf_reader = BufReader::new(sample.as_slice());
+    let mut buf = String::new();
+    // should result in an error
+    let short_lim = 5;
+    buf_reader.read_line_lim(&mut buf, &short_lim).is_err();
+
+    // should result in ok(7)
+    let long_lim = 10;
+    let size = buf_reader.read_line_lim(&mut buf, &long_lim).unwrap();
+    assert_eq!(size, 8);
+  }
+
+  #[test]
+  fn split_lim() {
+    // prepare sample and reader
+    let mut sample: Vec<u8> = vec![1; 10];
+    sample[3] = ';' as u8;
+    sample[8] = ';' as u8;
+    let buf_reader = BufReader::new(sample.as_slice());
+
+    let short_lim = 4;
+    let mut split_iter = buf_reader.split_lim(';' as u8, short_lim);
+    // should succeed
+    match split_iter.next() {
+      Some(split_1) => match split_1 {
+        Ok(_) => {}
+        Err(_) => panic!("should have found the first split"),
+      },
+      None => panic!("should have read something"),
+    }
+    // should fail
+    match split_iter.next() {
+      Some(split_2) => {
+        match split_2 {
+          Ok(_) => panic!("should not have found the next split"),
+          Err(_) => {} // we are expecting the error here
+        }
+      }
+      None => panic!("should have read something"),
+    }
+  }
+
+  #[test]
+  fn lines_lim() {
+    // prepare sample and reader
+    let mut sample: Vec<u8> = vec![1; 10];
+    sample[3] = '\n' as u8;
+    sample[8] = '\n' as u8;
+    let buf_reader = BufReader::new(sample.as_slice());
+
+    let short_lim = 4;
+    let mut line_iter = buf_reader.lines_lim(short_lim);
+    // should succeed
+    match line_iter.next() {
+      Some(line_1_result) => match line_1_result {
+        Ok(_) => {}
+        Err(_) => panic!("should have found the first line"),
+      },
+      None => panic!("should have read something"),
+    }
+    // should fail
+    match line_iter.next() {
+      Some(line_2_result) => {
+        match line_2_result {
+          Ok(_) => panic!("should not have found the next line"),
+          Err(_) => {} // we are expecting the error here
+        }
+      }
+      None => panic!("should have read something"),
+    }
   }
 }

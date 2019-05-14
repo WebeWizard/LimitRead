@@ -1,6 +1,6 @@
 [package]
 name = "limit_read"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["WebeWizard <webewizard@gmail.com>"]
 edition = "2018"
 description = "A companion to std::io::Take and an extension to std::io::BufRead to put a cap on methods that could potentionally read infinitely."
